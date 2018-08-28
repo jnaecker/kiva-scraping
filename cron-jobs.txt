@@ -1,2 +1,2 @@
-MAILTO=jnaecker@wesleyan.edu
-0 * * * * ./kiva-spider.sh
+MAILTO=jnaecker@gmail.com
+0 * * * * cd /users/jnaecker/kiva-scraping; /bin/bash kiva-spider.sh

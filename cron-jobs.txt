@@ -1,0 +1,2 @@
+MAILTO=jnaecker@wesleyan.edu
+0 * * * * ./kiva-spider.sh

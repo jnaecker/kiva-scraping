@@ -1,3 +1,4 @@
 **/*.html
 logs/*
+loans/*
 **/.DS_Store

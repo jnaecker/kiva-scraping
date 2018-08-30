@@ -1,4 +1,6 @@
 **/*.html
+loans_status*.txt
+**/*.pdf
 logs/*
 loans/*
 **/.DS_Store

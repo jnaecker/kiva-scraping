@@ -1,0 +1,45 @@
+---
+title: "Kiva Scraping Analysis"
+author: "Jeffrey Naecker"
+date: "8/30/2018"
+output: pdf_document
+---
+
+```{r setup, include=F, echo = F, message = F}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = F)
+```
+
+```{r more-setup}
+#### PACKAGES ####
+library(stringr)
+library(tidyverse)
+library(purrr)
+library(lubridate)
+library(ggthemes)
+
+#### FUNCTIONS ####
+has_match <- function(filename){
+  filename %>%
+    readLines() %>%
+    paste(collapse = "\n") %>%
+    str_detect("matching-message")
+}
+```
+
+```{r make-plot}
+df <- tibble(
+  filename = list.files("loans", full.names = T, recursive = T),
+  has_match = map(filename, has_match) %>% unlist()
+)
+
+df %>%
+  mutate(
+    loan_id   = str_extract(filename, "[0-9]{7}"),
+    timestamp = ymd_hms(str_extract(filename, "[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}"))
+  ) %>%
+  ggplot() +
+    geom_point(aes(x = timestamp, y = loan_id, alpha = has_match)) + 
+    theme_tufte() +
+    labs(x = "Time", y = "Loan ID", title = "Match of loans over time")
+```
+

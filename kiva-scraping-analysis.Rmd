@@ -12,34 +12,88 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = F)
 ```{r more-setup}
 #### PACKAGES ####
 library(stringr)
+library(XML)
 library(tidyverse)
 library(purrr)
 library(lubridate)
 library(ggthemes)
 
 #### FUNCTIONS ####
-has_match <- function(filename){
-  filename %>%
-    readLines() %>%
-    paste(collapse = "\n") %>%
-    str_detect("matching-message")
+extract_data <- function(filename){
+  doc <- xmlParse(filename, isHTML = T)
+
+  # detect if this is a redirect by looking at title of HTML page
+  if (xpathApply(doc, "//title", xmlValue) %>% str_detect("Temporary Redirect")) {
+    tibble(
+      redirect       = T,
+      percent_raised = NA,
+      matched        = NA
+    )
+  # detect if loan is fully funded
+  } else if (xpathApply(doc, "//h2[@class='green-bolded inline']", xmlValue) %>% str_detect("Funded")) {
+    tibble(
+      redirect       = F,
+      percent_raised = 100,
+      matched        = NA
+    )
+  # if not a redirect or fully funded, extract info from HTML tree
+  } else {
+    tibble(
+      redirect       = F,
+      percent_raised = xpathApply(doc, "//div[@class='amount-raised']", xmlValue) %>% str_extract("[0-9]{1,2}") %>% as.numeric(),
+      matched        = xpathApply(doc, "//div[@class='matching-message']", xmlValue) %>% length() > 0
+    )
+  }
 }
 ```
 
 ```{r make-plot}
+tic()
 df <- tibble(
-  filename = list.files("loans", full.names = T, recursive = T),
-  has_match = map(filename, has_match) %>% unlist()
-)
-
-df %>%
+  filename  = list.files("loans", full.names = T, recursive = T),
+  loan_id   = str_extract(filename, "[0-9]{7}"),
+  timestamp = ymd_hms(str_extract(filename, "[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}")),
+  data      = map(filename, extract_data) 
+  ) %>% 
+  unnest()%>% 
   mutate(
-    loan_id   = str_extract(filename, "[0-9]{7}"),
-    timestamp = ymd_hms(str_extract(filename, "[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}"))
-  ) %>%
-  ggplot() +
-    geom_point(aes(x = timestamp, y = loan_id, alpha = has_match)) + 
-    theme_tufte() +
-    labs(x = "Time", y = "Loan ID", title = "Match of loans over time")
+    status = case_when(
+      redirect              ~ "Redirected",
+      percent_raised == 100 ~ "Funded",
+      matched               ~ "Matched",
+      !matched              ~ "Not Matched"
+    )
+  )
+toc()
+
+
+loans <- 
+  unique(df$loan_id) %>% paste(collapse = ",") %>%
+  paste("https://api.kivaws.org/v1/loans/", ., ".xml", sep = "") %>%
+  readLines() %>% 
+  paste(collapse = "n") %>% 
+  xmlParse() %>%
+  xmlToDataFrame(nodes = getNodeSet(., "//loan")) %>%
+  select(id, planned_expiration_date) %>%
+  mutate(planned_expiration_date = ymd_hms(planned_expiration_date))
+  
+df2 <- 
+  merge(df, loans, by.x = "loan_id", by.y = "id") %>%
+  mutate(time_remaining= planned_expiration_date - timestamp)
+
+keep <-
+  df2 %>%
+  group_by(loan_id) %>%
+  summarize(percent_observed = mean(status != "Redirected")) %>%
+  filter(percent_observed >= 0.4) %>%
+  pull(loan_id)
+
+ggplot(df2 %>% filter(loan_id %in% keep)) +
+  geom_point(aes(x = time_remaining, y = loan_id, color = status)) + 
+  theme_tufte() +
+  labs(x = "Days Remaining", y = "Loan ID", title = "Matching of loans by days remaining") +
+  scale_color_manual(values = c("#a1d99b", "#E69F00", "#56B4E9", "#f0f0f0")) +
+  scale_x_reverse()
+
 ```
 

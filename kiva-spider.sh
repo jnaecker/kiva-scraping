@@ -1,37 +1,28 @@
 #!/bin/bash
 
+# variables
+DATADIR=data
+LOGFILE=logfile.log
+
+
 # make folder to store loan data if does not exist
-if [ ! -d "loans" ]; then
-	mkdir loans
+if [ ! -d "$DATADIR" ]; then
+	mkdir $DATADIR
 fi
 
-# make folder to store log files if does not exist
-if [ ! -d "logs" ]; then
-	mkdir logs
+# make place to store logs if does not exist
+if [ ! -f "$LOGFILE" ]; then
+	touch $LOGFILE
 fi
-
-# start a log file
-LOGFILE=logs/$(date +%Y-%m-%d-%H-%M-%S).log
 
 echo "Starting to download at $(date +%Y-%m-%d\ %H:%M:%S)..." >> $LOGFILE 2>&1
 
-# for each loan in loan-list-txt
-while read LOAN; do
-
-  echo ${LOAN} >> $LOGFILE 2>&1
-
-  # make directory for that loan
-  if [ ! -d "loans/${LOAN}" ]; then
-  	mkdir loans/$LOAN
-  fi
-
-  # pull in the HTML for that loan and save with timestamp as filename
-  curl -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/44.0.2403.89 Safari/537.36" -s https://www.kiva.org/lend/${LOAN} -o "loans/${LOAN}/$(date +%Y-%m-%d-%H-%M-%S).html"
-
-  # wait before doing next curl to avoid getting blocked
-  sleep 30
-
-
-done < loan-list.txt # note the loan-list.txt is slurped here
+# pull in the JSON and save with timestamp as filename
+curl \
+  -X POST \
+  -H "Content-Type: application/json" \
+  --data '{"query": "{lend {loans(filters: {status: fundRaising}, limit:1000) {values { id isMatchable status fundraisingDate plannedExpirationDate loanAmount loanFundraisingInfo {fundedAmount} sector {id} borrowerCount}}}}"}' \
+    -o "$DATADIR/$(date +%Y-%m-%d-%H-%M-%S).json" \
+    https://api.kivaws.org/graphql
 
 echo "Download completed at $(date +%Y-%m-%d\ %H:%M:%S)" >> $LOGFILE 2>&1

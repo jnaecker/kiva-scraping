@@ -4,3 +4,7 @@ loans_status*.txt
 logs/*
 loans/*
 **/.DS_Store
+data/*
+_archive/*
+_skip/*
+*.log

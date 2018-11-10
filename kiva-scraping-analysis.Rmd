@@ -10,90 +10,166 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = F)
 ```
 
 ```{r more-setup}
+
 #### PACKAGES ####
-library(stringr)
-library(XML)
-library(tidyverse)
+library(dplyr)
+library(jsonlite)
 library(purrr)
+library(tidyr)
 library(lubridate)
+library(ggplot2)
 library(ggthemes)
+library(hrbrthemes)
+
 
 #### FUNCTIONS ####
-extract_data <- function(filename){
-  doc <- xmlParse(filename, isHTML = T)
-
-  # detect if this is a redirect by looking at title of HTML page
-  if (xpathApply(doc, "//title", xmlValue) %>% str_detect("Temporary Redirect")) {
-    tibble(
-      redirect       = T,
-      percent_raised = NA,
-      matched        = NA
-    )
-  # detect if loan is fully funded
-  } else if (xpathApply(doc, "//h2[@class='green-bolded inline']", xmlValue) %>% str_detect("Funded")) {
-    tibble(
-      redirect       = F,
-      percent_raised = 100,
-      matched        = NA
-    )
-  # if not a redirect or fully funded, extract info from HTML tree
-  } else {
-    tibble(
-      redirect       = F,
-      percent_raised = xpathApply(doc, "//div[@class='amount-raised']", xmlValue) %>% str_extract("[0-9]{1,2}") %>% as.numeric(),
-      matched        = xpathApply(doc, "//div[@class='matching-message']", xmlValue) %>% length() > 0
-    )
-  }
+extract_data <- function(x) {
+  cat("Extracting data from", x, "\n")
+  json <- fromJSON(x, flatten = T)
+  json$data$lend$loans$values
 }
+
+count_switches <- function(
+  matching_on # a vector of T/F values
+){
+  
+  # set counter
+  switch_count <- 0
+  
+  if (length(matching_on) > 1) {
+    
+    # loop over all transactions after the first (the intial state doesn't count as a switch)
+    for (i in 2:length(matching_on)) {
+      
+      # get current matched status and check against last
+      if (matching_on[i] != matching_on[i-1]) {switch_count <- switch_count + 1}
+    }
+  }
+  
+  # return counter
+  switch_count
+}
+
+
 ```
 
-```{r make-plot}
-tic()
-df <- tibble(
-  filename  = list.files("loans", full.names = T, recursive = T),
-  loan_id   = str_extract(filename, "[0-9]{7}"),
-  timestamp = ymd_hms(str_extract(filename, "[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}")),
-  data      = map(filename, extract_data) 
-  ) %>% 
-  unnest()%>% 
+
+```{r extract_data}
+observations <- 
+  tibble(file = list.files("data", full.names = T)) %>%
+  mutate(loans = map(file, ~extract_data(.))) %>%
+  unnest() %>%
   mutate(
-    status = case_when(
-      redirect              ~ "Redirected",
-      percent_raised == 100 ~ "Funded",
-      matched               ~ "Matched",
-      !matched              ~ "Not Matched"
-    )
-  )
-toc()
+    time                  = ymd_hms(file),
+    fundraisingDate       = ymd_hms(fundraisingDate),
+    plannedExpirationDate = ymd_hms(plannedExpirationDate),
+    fundedAmount          = as.numeric(loanFundraisingInfo.fundedAmount),
+    loanAmount            = as.numeric(loanAmount),
+    percentFunded         = fundedAmount / loanAmount,
+    daysRemaining         = (plannedExpirationDate - time) / ddays(1)
+    ) %>%
+    select(-loanFundraisingInfo.fundedAmount)
+```
 
 
+```{r make-plots}
+# how many loans in sample?
+length(unique(observations$id))
+
+## how often does each loan show up in data?
+observations %>% group_by(id) %>% count() %>% summary()
+
+## loan-level stats
 loans <- 
-  unique(df$loan_id) %>% paste(collapse = ",") %>%
-  paste("https://api.kivaws.org/v1/loans/", ., ".xml", sep = "") %>%
-  readLines() %>% 
-  paste(collapse = "n") %>% 
-  xmlParse() %>%
-  xmlToDataFrame(nodes = getNodeSet(., "//loan")) %>%
-  select(id, planned_expiration_date) %>%
-  mutate(planned_expiration_date = ymd_hms(planned_expiration_date))
+  observations %>%
+  group_by(id) %>%
+  summarize(
+    plannedExpirationDate  = plannedExpirationDate[1],
+    fundraisingDate        = fundraisingDate[1],
+    totalObservations      = n(),
+    matchedObservations    = sum(isMatchable, na.rm = T),
+    percentTimeMatched     = matchedObservations/totalObservations,
+    everMatchable          = TRUE %in% isMatchable,
+    numSwitches            = count_switches(isMatchable),
+    startsWithMatch        = isMatchable[1],
+    firstObservationDate   = time[1],
+    matchedInFirst5Days    = sum(isMatchable[(time - firstObservationDate)/ddays(1) <= 5]) > 0,
+    switchesInFirst5Days   = count_switches(isMatchable[(time - firstObservationDate)/ddays(1) <= 5]),
+    switchInFirst5Days     = switchesInFirst5Days > 0
+    )
+
+summary(loans)
+mean(loans$everMatchable)
+
+# how many stints in matchable state?
+loans %>%
+  group_by(everMatchable) %>%
+  summarize(
+    meanObservations = mean(totalObservations),
+    meanSwitches = mean(numSwitches),
+    meanPercentTimeMatched = mean(percentTimeMatched)
+  )
+
+# dig deeper on switches
+loans %>%
+  filter(everMatchable) %>%
+  ggplot(aes(x = numSwitches)) +
+    geom_histogram(binwidth = 1)
+
+# are the zero switches + matchable actually being observed more than once?
+loans %>%
+  filter(everMatchable & numSwitches == 0) %>%
+  summary()
+
+# are there loans that are matched at some point with 0 or 1 switches?
+matching_stats %>%
+  filter(everMatchable) %>%
+  group_by(numSwitches) %>%
+  summarize(
+    count = n(),
+    meanObservations = mean(totalObservations)
+  )
+
+# cross-tabluation of starting with match X switches in first 5 days
+xtabs(~ startsWithMatch + switchesInFirst5Days, data = loans)
+loans %>%
+  group_by(startsWithMatch, switchInFirst5Days) %>%
+  count() %>%
+  ungroup() %>%
+  mutate(percent = n/sum(n)) 
   
-df2 <- 
-  merge(df, loans, by.x = "loan_id", by.y = "id") %>%
-  mutate(time_remaining= planned_expiration_date - timestamp)
+# How does percent funded change over fundraising period?
+ggplot(observations, aes(x = as.factor(floor(daysRemaining)), y = percentFunded)) +
+  geom_boxplot() +
+  theme_bw() + 
+  labs(title = "Percent funded vs days of fundraising remaining.",
+       x = "Days remaining in fundraising",
+       y = "Percent funded")
 
-keep <-
-  df2 %>%
-  group_by(loan_id) %>%
-  summarize(percent_observed = mean(status != "Redirected")) %>%
-  filter(percent_observed >= 0.4) %>%
-  pull(loan_id)
+# Does likelihood of being matched change over fundraising period?
+ggplot(observations, aes(x = as.factor(floor(daysRemaining)), y = as.numeric(isMatchable))) +
+  stat_summary(fun.data = "mean_cl_boot") +
+  theme_bw() +
+  labs(title= "Fraction of matched loans vs days of fundraising remaining.",
+       x = "Days remaining in fundraising",
+       y = "Fraction matched")
 
-ggplot(df2 %>% filter(loan_id %in% keep)) +
-  geom_point(aes(x = time_remaining, y = loan_id, color = status)) + 
-  theme_tufte() +
-  labs(x = "Days Remaining", y = "Loan ID", title = "Matching of loans by days remaining") +
-  scale_color_manual(values = c("#a1d99b", "#E69F00", "#56B4E9", "#f0f0f0")) +
-  scale_x_reverse()
+# Does likelihood of being matched change over calendar time?
+ggplot(observations, aes(x = time, y = as.numeric(isMatchable))) +
+  stat_smooth(method = "lm") +
+  theme_bw() +
+  labs(title= "Fraction of matched loans vs calendar time.",
+       x = "Date",
+       y = "Fraction matched")
+
+observations %>%
+  group_by(time) %>%
+  summarize(percentMatchable = mean(isMatchable))
+
+matching_stats
+
+observations %>% subset(id == 1609721)
+
 
 ```
 

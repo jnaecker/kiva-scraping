@@ -1,12 +1,12 @@
 ---
 title: "Kiva Scraping Analysis"
 author: "Jeffrey Naecker"
-date: "8/30/2018"
+date: "5/16/2019"
 output: pdf_document
 ---
 
 ```{r setup, include=F, echo = F, message = F}
-knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = F)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, ccache = TRUE)
 ```
 
 ```{r more-setup}
@@ -18,13 +18,11 @@ library(purrr)
 library(tidyr)
 library(lubridate)
 library(ggplot2)
-library(ggthemes)
-library(hrbrthemes)
-
+library(stringr)
 
 #### FUNCTIONS ####
-extract_data <- function(x) {
-  cat("Extracting data from", x, "\n")
+extract_data <- function(x, quietly = T) {
+  if (!quietly) {cat("Extracting data from", x, "\n")}
   json <- fromJSON(x, flatten = T)
   json$data$lend$loans$values
 }
@@ -49,16 +47,19 @@ count_switches <- function(
   # return counter
   switch_count
 }
+
+##### CONSTANTS #####
+theme_set(theme_minimal())
 ```
 
-
-```{r extract_data}
+```{r extract_data,}
+# read in json data
 observations <- 
   tibble(file = list.files("data", full.names = T)) %>%
   mutate(
     time = ymd_hms(file),
+    gender = str_extract(file, "(male)|(female)")
     ) %>%
-  filter(time >= "2019-05-01") %>%
   mutate(loans = map(file, ~extract_data(.))) %>%
   unnest() %>%
   mutate(
@@ -70,32 +71,13 @@ observations <-
     daysRemaining         = (plannedExpirationDate - time) / ddays(1)
     ) %>%
     select(-loanFundraisingInfo.fundedAmount)
-```
 
-
-```{r make-plots}
-# how many loans in sample?
-length(unique(observations$id))
-
-## how often does each loan show up in data?
-observations %>% group_by(id) %>% count() %>% summary()
-
-## 
-observations %>%
-  select(time, id, fundedAmount) %>%
-  arrange(id) %>%
-  group_by(id) %>%
-  mutate(obs = row_number()) %>%
-  select(-time) %>%
-  tidyr::spread(obs, fundedAmount) %>%
-  mutate(diff = `2` - `1`) %>%
-  filter(is.na(diff))
-
-## loan-level stats
+## calculate loan-level stats
 loans <- 
   observations %>%
   group_by(id) %>%
   summarize(
+    loanAmount             = loanAmount[1],
     plannedExpirationDate  = plannedExpirationDate[1],
     fundraisingDate        = fundraisingDate[1],
     totalObservations      = n(),
@@ -109,47 +91,42 @@ loans <-
     switchesInFirst5Days   = count_switches(isMatchable[(time - firstObservationDate)/ddays(1) <= 5]),
     switchInFirst5Days     = switchesInFirst5Days > 0
     )
+```
 
-summary(loans)
-mean(loans$everMatchable)
+Number of unique loans in sample: `r length(unique(observations$id))`.
 
-# how many stints in matchable state?
-loans %>%
-  group_by(everMatchable) %>%
-  summarize(
-    meanObservations = mean(totalObservations),
-    meanSwitches = mean(numSwitches),
-    meanPercentTimeMatched = mean(percentTimeMatched)
-  )
-
-# dig deeper on switches
-loans %>%
-  filter(everMatchable) %>%
-  ggplot(aes(x = numSwitches)) +
-    geom_histogram(binwidth = 1)
-
-# are the zero switches + matchable actually being observed more than once?
-loans %>%
-  filter(everMatchable & numSwitches == 0) %>%
-  summary()
-
-# are there loans that are matched at some point with 0 or 1 switches?
-matching_stats %>%
-  filter(everMatchable) %>%
-  group_by(numSwitches) %>%
-  summarize(
-    count = n(),
-    meanObservations = mean(totalObservations)
-  )
-
-# cross-tabluation of starting with match X switches in first 5 days
-xtabs(~ startsWithMatch + switchesInFirst5Days, data = loans)
-loans %>%
-  group_by(startsWithMatch, switchInFirst5Days) %>%
-  count() %>%
-  ungroup() %>%
-  mutate(percent = n/sum(n)) 
+```{r loans-vs-time}
+observations %>%
+  group_by(time = floor_date(time, "minute")) %>%
+  summarize(count = n()) %>%
+  ggplot(aes(x = time, y = count)) +
+    geom_line()
   
+```
+
+
+```{r match-vs-days-remaining}
+# Does likelihood of being matched change over fundraising period?
+ggplot(observations, aes(x = as.factor(floor(daysRemaining)), y = as.numeric(isMatchable))) +
+  stat_summary(fun.data = "mean_cl_boot") +
+  theme_bw() +
+  labs(title = "Fraction of matched loans vs days of fundraising remaining.",
+       x     = "Days remaining in fundraising",
+       y     = "Fraction matched")
+```
+
+```{r match-vs-datetime, include=F}
+# Does likelihood of being matched change over calendar time?
+ggplot(observations, aes(x = floor_date(time, "minute"), y = as.numeric(isMatchable))) +
+  stat_summary(fun.data = "mean_cl_boot") +
+  theme_bw() +
+  labs(title = "Fraction of matched loans vs calendar time.",
+       x     = "Date",
+       y     = "Fraction matched")
+```
+
+
+```{r percent-funded-vs-days-remaining}
 # How does percent funded change over fundraising period?
 ggplot(observations, aes(x = as.factor(floor(daysRemaining)), y = percentFunded)) +
   geom_boxplot() +
@@ -157,31 +134,5 @@ ggplot(observations, aes(x = as.factor(floor(daysRemaining)), y = percentFunded)
   labs(title = "Percent funded vs days of fundraising remaining.",
        x = "Days remaining in fundraising",
        y = "Percent funded")
-
-# Does likelihood of being matched change over fundraising period?
-ggplot(observations, aes(x = as.factor(floor(daysRemaining)), y = as.numeric(isMatchable))) +
-  stat_summary(fun.data = "mean_cl_boot") +
-  theme_bw() +
-  labs(title= "Fraction of matched loans vs days of fundraising remaining.",
-       x = "Days remaining in fundraising",
-       y = "Fraction matched")
-
-# Does likelihood of being matched change over calendar time?
-ggplot(observations, aes(x = time, y = as.numeric(isMatchable))) +
-  stat_smooth(method = "lm") +
-  theme_bw() +
-  labs(title= "Fraction of matched loans vs calendar time.",
-       x = "Date",
-       y = "Fraction matched")
-
-observations %>%
-  group_by(time) %>%
-  summarize(percentMatchable = mean(isMatchable))
-
-matching_stats
-
-observations %>% subset(id == 1609721)
-
-
 ```
 

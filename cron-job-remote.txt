@@ -1,0 +1,2 @@
+MAILTO=jnaecker@gmail.com
+*/15 * * * * cd /home/jnaecker/kiva-scraping; /bin/bash kiva-spider.sh

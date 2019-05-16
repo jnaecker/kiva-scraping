@@ -21,14 +21,14 @@ echo "Starting to download at $(date +%Y-%m-%d\ %H:%M:%S)..." >> $LOGFILE 2>&1
 curl \
   -X POST \
   -H "Content-Type: application/json" \
-  --data '{"query": "{lend {loans(filters: {status: fundraising, gender: male}, limit:5000) {values { id isMatchable status fundraisingDate plannedExpirationDate loanAmount loanFundraisingInfo {fundedAmount} sector {id} borrowerCount}}}}"}' \
+  --data '{"query": "{lend {loans(filters: {status: fundraising, gender: male}, limit:5000) {values { id isMatchable status fundraisingDate plannedExpirationDate loanAmount loanFundraisingInfo {fundedAmount} sector {id} borrowerCount lenders {totalCount}}}}}"}' \
     -o "$DATADIR/$(date +%Y-%m-%d-%H-%M-%S)-male.json" \
     http://api.kivaws.org/graphql
 
 curl \
   -X POST \
   -H "Content-Type: application/json" \
-  --data '{"query": "{lend {loans(filters: {status: fundraising, gender: female}, limit:5000) {values { id isMatchable status fundraisingDate plannedExpirationDate loanAmount loanFundraisingInfo {fundedAmount} sector {id} borrowerCount}}}}"}' \
+  --data '{"query": "{lend {loans(filters: {status: fundraising, gender: female}, limit:5000) {values { id isMatchable status fundraisingDate plannedExpirationDate loanAmount loanFundraisingInfo {fundedAmount} sector {id} borrowerCount lenders {totalCount}}}}}"}' \
     -o "$DATADIR/$(date +%Y-%m-%d-%H-%M-%S)-female.json" \
     http://api.kivaws.org/graphql
 

@@ -49,18 +49,19 @@ count_switches <- function(
   # return counter
   switch_count
 }
-
-
 ```
 
 
 ```{r extract_data}
 observations <- 
   tibble(file = list.files("data", full.names = T)) %>%
+  mutate(
+    time = ymd_hms(file),
+    ) %>%
+  filter(time >= "2019-05-01") %>%
   mutate(loans = map(file, ~extract_data(.))) %>%
   unnest() %>%
   mutate(
-    time                  = ymd_hms(file),
     fundraisingDate       = ymd_hms(fundraisingDate),
     plannedExpirationDate = ymd_hms(plannedExpirationDate),
     fundedAmount          = as.numeric(loanFundraisingInfo.fundedAmount),
@@ -78,6 +79,17 @@ length(unique(observations$id))
 
 ## how often does each loan show up in data?
 observations %>% group_by(id) %>% count() %>% summary()
+
+## 
+observations %>%
+  select(time, id, fundedAmount) %>%
+  arrange(id) %>%
+  group_by(id) %>%
+  mutate(obs = row_number()) %>%
+  select(-time) %>%
+  tidyr::spread(obs, fundedAmount) %>%
+  mutate(diff = `2` - `1`) %>%
+  filter(is.na(diff))
 
 ## loan-level stats
 loans <- 

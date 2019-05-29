@@ -10,87 +10,17 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, ccache = T
 ```
 
 ```{r more-setup}
-
 #### PACKAGES ####
 library(dplyr)
-library(jsonlite)
-library(purrr)
-library(tidyr)
 library(lubridate)
 library(ggplot2)
-library(stringr)
-
-#### FUNCTIONS ####
-extract_data <- function(x, quietly = T) {
-  if (!quietly) {cat("Extracting data from", x, "\n")}
-  json <- fromJSON(x, flatten = T)
-  json$data$lend$loans$values
-}
-
-count_switches <- function(
-  matching_on # a vector of T/F values
-){
-  
-  # set counter
-  switch_count <- 0
-  
-  if (length(matching_on) > 1) {
-    
-    # loop over all transactions after the first (the intial state doesn't count as a switch)
-    for (i in 2:length(matching_on)) {
-      
-      # get current matched status and check against last
-      if (matching_on[i] != matching_on[i-1]) {switch_count <- switch_count + 1}
-    }
-  }
-  
-  # return counter
-  switch_count
-}
 
 ##### CONSTANTS #####
 theme_set(theme_minimal())
 ```
 
-```{r extract_data,}
-# read in json data
-observations <- 
-  tibble(file = list.files("data", full.names = T)) %>%
-  mutate(
-    time = ymd_hms(file),
-    gender = str_extract(file, "(male)|(female)")
-    ) %>%
-  mutate(loans = map(file, ~extract_data(.))) %>%
-  unnest() %>%
-  mutate(
-    fundraisingDate       = ymd_hms(fundraisingDate),
-    plannedExpirationDate = ymd_hms(plannedExpirationDate),
-    fundedAmount          = as.numeric(loanFundraisingInfo.fundedAmount),
-    loanAmount            = as.numeric(loanAmount),
-    percentFunded         = fundedAmount / loanAmount,
-    daysRemaining         = (plannedExpirationDate - time) / ddays(1)
-    ) %>%
-    select(-loanFundraisingInfo.fundedAmount)
-
-## calculate loan-level stats
-loans <- 
-  observations %>%
-  group_by(id) %>%
-  summarize(
-    loanAmount             = loanAmount[1],
-    plannedExpirationDate  = plannedExpirationDate[1],
-    fundraisingDate        = fundraisingDate[1],
-    totalObservations      = n(),
-    matchedObservations    = sum(isMatchable, na.rm = T),
-    percentTimeMatched     = matchedObservations/totalObservations,
-    everMatchable          = TRUE %in% isMatchable,
-    numSwitches            = count_switches(isMatchable),
-    startsWithMatch        = isMatchable[1],
-    firstObservationDate   = time[1],
-    matchedInFirst5Days    = sum(isMatchable[(time - firstObservationDate)/ddays(1) <= 5]) > 0,
-    switchesInFirst5Days   = count_switches(isMatchable[(time - firstObservationDate)/ddays(1) <= 5]),
-    switchInFirst5Days     = switchesInFirst5Days > 0
-    )
+```{r load-data}
+load("data/clean-data.rda")
 ```
 
 Number of unique loans in sample: `r length(unique(observations$id))`.
@@ -101,15 +31,12 @@ observations %>%
   summarize(count = n()) %>%
   ggplot(aes(x = time, y = count)) +
     geom_line()
-  
 ```
-
 
 ```{r match-vs-days-remaining}
 # Does likelihood of being matched change over fundraising period?
 ggplot(observations, aes(x = as.factor(floor(daysRemaining)), y = as.numeric(isMatchable))) +
-  stat_summary(fun.data = "mean_cl_boot") +
-  theme_bw() +
+  stat_summary(fun.y = "mean", geom = "point") +
   labs(title = "Fraction of matched loans vs days of fundraising remaining.",
        x     = "Days remaining in fundraising",
        y     = "Fraction matched")
@@ -118,7 +45,7 @@ ggplot(observations, aes(x = as.factor(floor(daysRemaining)), y = as.numeric(isM
 ```{r match-vs-datetime, include=F}
 # Does likelihood of being matched change over calendar time?
 ggplot(observations, aes(x = floor_date(time, "minute"), y = as.numeric(isMatchable))) +
-  stat_summary(fun.data = "mean_cl_boot") +
+  stat_summary(fun.y = "mean", geom = "point") +
   theme_bw() +
   labs(title = "Fraction of matched loans vs calendar time.",
        x     = "Date",
@@ -129,10 +56,57 @@ ggplot(observations, aes(x = floor_date(time, "minute"), y = as.numeric(isMatcha
 ```{r percent-funded-vs-days-remaining}
 # How does percent funded change over fundraising period?
 ggplot(observations, aes(x = as.factor(floor(daysRemaining)), y = percentFunded)) +
-  geom_boxplot() +
+  stat_summary(fun.y = "mean", geom = "point") +
   theme_bw() + 
   labs(title = "Percent funded vs days of fundraising remaining.",
        x = "Days remaining in fundraising",
        y = "Percent funded")
 ```
+
+```{r pilot-loans-fundraising}
+pilot_loan_ids <- unique(pilot_results$id)
+
+observations %>%
+  mutate(id = as.character(id)) %>%
+  filter(id %in% pilot_loan_ids) %>%
+  filter(time >= "2019-05-22 12:00:00") %>%
+  ggplot(aes(x = floor_date(time, "minute"), y = fundedAmount, color = isMatchable)) +
+    geom_point() +
+    facet_wrap(~id, ncol = 2) +
+    theme_bw()
+```
+
+```{r pilot-loans-fundraising-detail}
+observations %>%
+  mutate(id = as.character(id)) %>%
+  filter(id %in% pilot_loan_ids) %>%
+  filter(time >= "2019-05-22 18:00:00" & time <= "2019-05-22 22:00:00") %>%
+  ggplot() +
+    geom_point(aes(x = floor_date(time, "minute"), y = fundedAmount, color = isMatchable)) +
+    geom_segment(aes(x = Purchase.Date + dhours(3), y = 0, xend = Purchase.Date + dhours(3), yend = You.Loaned), data = pilot_results, size = 1) +
+    facet_wrap(~id, ncol = 2, scales = "free_y") +
+    theme_bw()
+```
+
+Did loans meet our criteria?
+
+```{r}
+observations %>%
+  filter(id %in% pilot_loan_ids) %>% 
+  select(id, fundraisingDate, plannedExpirationDate, loanAmount) %>%
+  unique()
+```
+
+Loans we could have matched (assuming correct criteria):
+
+```{r}
+observations %>%
+  mutate(id = as.character(id)) %>%
+  filter(time >= "2019-05-23 02:45:00" & time <= "2019-05-23 03:00:00") %>%
+  filter(loanAmount <= 1000) %>%
+  filter(fundraisingDate < time & fundraisingDate >= time - dhours(24)) %>%
+  select(id, fundraisingDate, plannedExpirationDate, loanAmount) %>%
+  unique()
+```
+
 

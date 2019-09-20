@@ -64,12 +64,12 @@ ggplot(observations, aes(x = as.factor(floor(daysRemaining)), y = percentFunded)
 ```
 
 ```{r pilot-loans-fundraising}
-pilot_loan_ids <- unique(pilot_results$id)
+pilot_loan_ids <- unique(pilot_results$`Loan ID`)
 
 observations %>%
   mutate(id = as.character(id)) %>%
   filter(id %in% pilot_loan_ids) %>%
-  filter(time >= "2019-05-22 12:00:00") %>%
+  filter(time >= "2019-09-16 12:00:00" & time <= "2019-09-17 12:00:00") %>%
   ggplot(aes(x = floor_date(time, "minute"), y = fundedAmount, color = isMatchable)) +
     geom_point() +
     facet_wrap(~id, ncol = 2) +

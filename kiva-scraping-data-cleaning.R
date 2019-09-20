@@ -43,7 +43,8 @@ observations <-
     time = ymd_hms(file),
     gender = str_extract(file, "(male)|(female)")
   ) %>%
-  mutate(loans = map(file, ~extract_data(.))) %>%
+  filter(time >= "2019-09-12 00:00:01" & time <= "2019-09-20 00:00:01") %>%
+  mutate(loans = map(file, ~extract_data(., quietly = F))) %>%
   unnest() %>%
   mutate(
     fundraisingDate       = ymd_hms(fundraisingDate),
@@ -76,12 +77,10 @@ loans <-
   )
 
 ## import pilot data
+## to get most recent data, log in to Kiva account > Transaction history > Export
 pilot_results <- 
-  read.csv("data/KivaLoansForbdouglasbernheim5730 2019-05-24T14_34_26-07_00.csv") %>%
-  as_tibble() %>%
-  mutate(
-    id = ID,
-    Purchase.Date = ymd_hms(Purchase.Date))
+  readr::read_csv("data/Kiva_Transactions_2019-09-19-22-10-24.csv") %>%
+  as_tibble()
 
 ## save data
 save(observations, loans, pilot_results, file = "data/clean-data.rda")

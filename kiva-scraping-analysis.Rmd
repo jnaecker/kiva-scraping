@@ -17,6 +17,9 @@ library(ggplot2)
 
 ##### CONSTANTS #####
 theme_set(theme_minimal())
+
+timeLower = "2019-09-16 12:00:00"
+timeUpper = "2019-09-17 12:00:00"
 ```
 
 ```{r load-data}
@@ -66,10 +69,11 @@ ggplot(observations, aes(x = as.factor(floor(daysRemaining)), y = percentFunded)
 ```{r pilot-loans-fundraising}
 pilot_loan_ids <- unique(pilot_results$`Loan ID`)
 
+
 observations %>%
   mutate(id = as.character(id)) %>%
   filter(id %in% pilot_loan_ids) %>%
-  filter(time >= "2019-09-16 12:00:00" & time <= "2019-09-17 12:00:00") %>%
+  filter(time >= timeLower & time <= timeUpper) %>%
   ggplot(aes(x = floor_date(time, "minute"), y = fundedAmount, color = isMatchable)) +
     geom_point() +
     facet_wrap(~id, ncol = 2) +
@@ -77,13 +81,14 @@ observations %>%
 ```
 
 ```{r pilot-loans-fundraising-detail}
+
 observations %>%
   mutate(id = as.character(id)) %>%
   filter(id %in% pilot_loan_ids) %>%
-  filter(time >= "2019-05-22 18:00:00" & time <= "2019-05-22 22:00:00") %>%
+  filter(time >= timeLower & time <= timeUpper) %>%
   ggplot() +
     geom_point(aes(x = floor_date(time, "minute"), y = fundedAmount, color = isMatchable)) +
-    geom_segment(aes(x = Purchase.Date + dhours(3), y = 0, xend = Purchase.Date + dhours(3), yend = You.Loaned), data = pilot_results, size = 1) +
+##    geom_segment(aes(x = Purchase.Date + dhours(3), y = 0, xend = Purchase.Date + dhours(3), yend = You.Loaned), data = pilot_results, size = 1) +
     facet_wrap(~id, ncol = 2, scales = "free_y") +
     theme_bw()
 ```
@@ -94,7 +99,8 @@ Did loans meet our criteria?
 observations %>%
   filter(id %in% pilot_loan_ids) %>% 
   select(id, fundraisingDate, plannedExpirationDate, loanAmount) %>%
-  unique()
+  unique() %>%
+  arrange(fundraisingDate)
 ```
 
 Loans we could have matched (assuming correct criteria):
@@ -102,11 +108,12 @@ Loans we could have matched (assuming correct criteria):
 ```{r}
 observations %>%
   mutate(id = as.character(id)) %>%
-  filter(time >= "2019-05-23 02:45:00" & time <= "2019-05-23 03:00:00") %>%
+  filter(time >= timeLower & time <= timeUpper) %>%
   filter(loanAmount <= 1000) %>%
   filter(fundraisingDate < time & fundraisingDate >= time - dhours(24)) %>%
   select(id, fundraisingDate, plannedExpirationDate, loanAmount) %>%
-  unique()
+  unique() %>%
+  arrange(fundraisingDate)
 ```
 
 

@@ -20,6 +20,10 @@ theme_set(theme_minimal())
 
 timeLower = "2019-09-16 12:00:00"
 timeUpper = "2019-09-17 12:00:00"
+
+timeFirstMatch = "2019-09-16 12:45:01"
+timeLastMatch  = "2019-09-16 16:00:10"
+
 ```
 
 ```{r load-data}
@@ -73,7 +77,7 @@ pilot_loan_ids <- unique(pilot_results$`Loan ID`)
 observations %>%
   mutate(id = as.character(id)) %>%
   filter(id %in% pilot_loan_ids) %>%
-  filter(time >= timeLower & time <= timeUpper) %>%
+  filter(time >= ymd_hms(timeFirstMatch) & time <= ymd_hms(timeLastMatch)) %>%
   ggplot(aes(x = floor_date(time, "minute"), y = fundedAmount, color = isMatchable)) +
     geom_point() +
     facet_wrap(~id, ncol = 2) +
@@ -85,7 +89,7 @@ observations %>%
 observations %>%
   mutate(id = as.character(id)) %>%
   filter(id %in% pilot_loan_ids) %>%
-  filter(time >= timeLower & time <= timeUpper) %>%
+  filter(time >= ymd_hms(timeFirstMatch) & time <= ymd_hms(timeLastMatch)) %>%
   ggplot() +
     geom_point(aes(x = floor_date(time, "minute"), y = fundedAmount, color = isMatchable)) +
 ##    geom_segment(aes(x = Purchase.Date + dhours(3), y = 0, xend = Purchase.Date + dhours(3), yend = You.Loaned), data = pilot_results, size = 1) +
@@ -103,12 +107,79 @@ observations %>%
   arrange(fundraisingDate)
 ```
 
+
+Of these loans, what transactions happened within the window where matching was active?
+```{r, rows.print=20}
+
+observations %>%
+  filter(id %in% pilot_loan_ids) %>%
+  mutate(id = as.character(id)) %>%
+  filter(time >= ymd_hms(timeFirstMatch) & time <= ymd_hms(timeLastMatch)) %>%
+  filter(loanAmount <= 1000) %>%
+  filter(fundraisingDate < time & fundraisingDate >= time - dhours(24)) %>%
+  group_by(id) %>%
+  summarize(
+    #loanAmount             = loanAmount[1],
+    #plannedExpirationDate  = plannedExpirationDate[1],
+    fundraisingDate        = fundraisingDate[1],
+    totalObservations      = n(),
+    percentMatched     = sum(isMatchable, na.rm = T)/totalObservations) %>%
+  arrange(fundraisingDate) %>%
+  print(tibble.width = Inf)
+```
+
+
+
+Other eligible loans (id ending in zero) that we didn't match. Were they matched by others during the window where matching was active?
+```{r, rows.print=20}
+observations %>%
+  filter(id %% 10 == 0) %>%
+  filter(! id %in% pilot_loan_ids) %>%
+  mutate(id = as.character(id)) %>%
+  filter(time >= ymd_hms(timeFirstMatch) & time <= ymd_hms(timeLastMatch)) %>%
+  filter(loanAmount <= 1000) %>%
+  filter(fundraisingDate < time & fundraisingDate >= time - dhours(24)) %>%
+  group_by(id) %>%
+  summarize(
+    loanAmount             = loanAmount[1],
+    fundraisingDate        = fundraisingDate[1],
+    totalObservations      = n(),
+    percentMatched     = sum(isMatchable, na.rm = T)/totalObservations) %>%
+  arrange(fundraisingDate) %>%
+  print(tibble.width = Inf)
+```
+
+
+
+
+Ineligible loans (id not ending in zero). Were they matched by others during the window where matching was active?
+
+```{r, rows.print=20}
+observations %>%
+  filter(id %% 10 != 0) %>%
+  mutate(id = as.character(id)) %>%
+  filter(time >= ymd_hms(timeFirstMatch) & time <= ymd_hms(timeLastMatch)) %>%
+  filter(loanAmount <= 1000) %>%
+  filter(fundraisingDate < time & fundraisingDate >= time - dhours(24)) %>%
+  group_by(id) %>%
+  summarize(
+    loanAmount             = loanAmount[1],
+    fundraisingDate        = fundraisingDate[1],
+    totalObservations      = n(),
+    percentMatched     = sum(isMatchable, na.rm = T)/totalObservations) %>%
+  arrange(fundraisingDate) %>%
+  print(tibble.width = Inf)
+```
+
+
+
 Loans we could have matched (assuming correct criteria):
 
-```{r}
+```{r, rows.print=20}
 observations %>%
+  filter(id %% 10 != 0) %>%
   mutate(id = as.character(id)) %>%
-  filter(time >= timeLower & time <= timeUpper) %>%
+  filter(time >= ymd_hms(timeFirstMatch) & time <= ymd_hms(timeLastMatch)) %>%
   filter(loanAmount <= 1000) %>%
   filter(fundraisingDate < time & fundraisingDate >= time - dhours(24)) %>%
   select(id, fundraisingDate, plannedExpirationDate, loanAmount) %>%

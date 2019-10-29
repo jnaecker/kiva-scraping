@@ -9,8 +9,15 @@ library(tidyr)
 #### FUNCTIONS ####
 extract_data <- function(x, quietly = T) {
   if (!quietly) {cat("Extracting data from", x, "\n")}
-  json <- fromJSON(x, flatten = T)
-  json$data$lend$loans$values
+  out <- tryCatch( { json <- fromJSON(x, flatten = T)
+                      return(json$data$lend$loans$values) 
+                    },
+                    error = function(e) {
+                      message("Error extracting data:")
+                      message(e)
+                      message("skipping")
+                      return(NA)
+                    })
 }
 
 count_switches <- function(
@@ -45,6 +52,7 @@ observations <-
   ) %>%
   filter(time >= "2019-09-12 00:00:01" & time <= "2019-09-20 00:00:01") %>%
   mutate(loans = map(file, ~extract_data(., quietly = F))) %>%
+  filter(!is.na(loans)) %>% # drop missing observatinos
   unnest() %>%
   mutate(
     fundraisingDate       = ymd_hms(fundraisingDate),
